@@ -1,0 +1,227 @@
+<!DOCTYPE HTML>
+<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-cookie/1.4.1/jquery.cookie.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery.activity-indicator/1.0.0/jquery.activity-indicator.min.js"></script>
+<script type="text/javascript">
+$(function() {
+// フォームとのやりとりクラス
+  class FormAccess {    
+    static get CalenderID() {
+      return $("input:radio[name=calender_id]:checked").val();
+    }
+
+    static get Year() {
+      return $("input:text[name=year]").val();
+    }
+
+    static get Alarms() {
+      return $("[name=alarm_minute] option:selected").map((index, element) => $(element).val()).toArray()
+    }
+
+    static get EnableHoliday() {
+      return $("input:checkbox[name=enable_holyday]").is(":checked");
+    }
+
+    static get ShiftMaxTable() {
+      return  $("textarea[name=shiftmax_table]").val();
+    }
+
+    static set CalenderID(calender_id) {
+      $("input:radio[name=calender_id]").val([calender_id]) // ラジオボタンの場合、val内に[]カギカッコが必要（配列として選択される）
+    }
+
+    static set Year(year) {
+      $("input:text[name=year]").val(year)
+    }
+
+    static set Alarms(minutes) {
+      $("[name=alarm_minute]").val(minutes)
+    }
+
+    static set EnableHoliday(isChecked) {
+      $("input:checkbox[name=enable_holyday]").prop("checked", isChecked);
+    }
+  }
+
+// ラジオボタン生成
+  google.script.run.withSuccessHandler(function(html) {
+    $("#calender_select").html(html);
+    LoadCookie(); // ラジオボタン生成後にクッキー読み込み
+  }).GetCalenderNameHTML();
+
+// 送信ボタン
+  $("input:button[name=submit]").on("click", function() {
+    const calender_id = FormAccess.CalenderID;
+    const year = FormAccess.Year;
+    const enable_holyday = FormAccess.EnableHoliday;
+    const alarms = FormAccess.Alarms;
+    const shiftmax_table = FormAccess.ShiftMaxTable;
+
+    console.log(alarms);
+
+    // クライアント側でフォーム内容をチェック
+    if (InputCheck(calender_id, year, shiftmax_table)) {
+      // ShiftMaxテーブルの解析
+      const google_table = ParseShiftMaxTable(shiftmax_table, year, enable_holyday);
+
+      if (google_table == "") {
+        alert("テーブルの入力が誤っています。\n正しい書式のテーブルをコピペしてください。");
+        return;
+      }
+
+      // 確認ダイアログ表示
+      const confirm_text = "下記の内容を送信します。よろしいですか？\n"
+      + "カレンダーID:" + calender_id + "\n"
+      + "\n"
+      + "テーブル：\n"
+      + google_table + "\n";
+      var result = window.confirm(confirm_text);
+
+      if (result) {
+        SubmitStart();
+        google.script.run.withSuccessHandler(function(count) {
+          SubmitComplete();
+          if (0 < count) {
+            var result = window.confirm(count + "件のデータをカレンダーに登録しました。\nカレンダーを確認しますか？");
+            if (result) {
+              // カレンダーを別窓で開く処理
+              window.open("https://calendar.google.com", "_blank");
+            }
+            SaveCookie(); // フォーム内容をクッキーに保存
+          }
+          else
+          {
+            alert("カレンダー登録時にエラーが発生しました。");
+          }
+        }).withFailureHandler(function(error) {
+          SubmitComplete();
+          alert("カレンダー送信に失敗しました。\n" + error.message);
+        }).ImportGoogleCalender(calender_id, google_table, alarms); // カレンダー登録実施
+      }
+    }
+  })
+
+// フォーム内容のチェック
+  function InputCheck(calender_id, year, shiftmax_table) {
+    const regexp_calender_id = new RegExp("^[a-zA-Z0-9_+-]+(.[a-zA-Z0-9_+-]+)*@([a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]*\.)+[a-zA-Z]{2,}$");  //　アドレスチェック
+    const regexp_year = new RegExp("^[12][0-9]{3}$"); // 1000～2999まで入力可
+
+    if (!regexp_calender_id.test(calender_id)) {
+      alert("カレンダーIDの入力が不正です:" + calender_id);
+      return false;
+    }
+
+    if (!regexp_year.test(year)) {
+      alert("年の入力が不正です:" + year);
+      return false;
+    }
+
+    if (shiftmax_table.length == 0) {
+      alert("ShiftMaxテーブルが入力されていません");
+      return false;
+    }
+
+    return true;
+  }
+
+// コピペしたShiftMaxテーブルを形成
+  function ParseShiftMaxTable(shiftmax_table, year, enable_holyday) {
+    var google_table = "";
+    const regexp_date = new RegExp("^(0[1-9]|1[0-2])/([0-2][0-9]|3[01])\\([日月火水木金土]\\)$"); // 日付 MM/DD（Week）
+    const regexp_time = new RegExp("^([01][0-9]|2[0-3]):([0-5][0-9])$");  // 時刻 hh:mm
+
+    // 日付フォーマット関数の用意
+    const formatDate = (date) => {
+      // padStart関数でゼロ埋め（01,02,03...）する
+      let y = String(date.getFullYear()).padStart(4, "0");
+      let m = String(date.getMonth() + 1).padStart(2, "0");   // 返り値は 0～11 なので +1 する
+      let d = String(date.getDate()).padStart(2, "0");
+      let hh = String(date.getHours()).padStart(2, "0");
+      let mm = String(date.getMinutes()).padStart(2, "0"); 
+
+      return `${y}/${m}/${d} ${hh}:${mm}`; 
+    }
+    
+    var rows = shiftmax_table.split("\n");
+    rows.forEach(row => {
+      let cols = row.split("\t");
+      if (0 < cols.length)
+      {
+        let date = cols[0] !== undefined ? cols[0].trim(): "";            // 日付
+        let shift = cols[1] !== undefined ? cols[1].trim(): "";           // シフト　例＞B1～B7 または 休日
+        let starttime = cols[2] !== undefined ? cols[2].trim(): "";       // 開始時間
+        let endtime = cols[3] !== undefined ? cols[3].trim(): "";         // 終了時間
+
+        // 一列目が日付形式なら登録開始
+        if (regexp_date.test(date)) {
+          date = date.substr(0,5);  // MM/DD だけ取り出す
+
+          // 休日チェック
+          if ((!enable_holyday && shift == "法定休日") ||
+            (!enable_holyday && shift == "所定休日") ||
+            (!enable_holyday && shift == "希望休") ||
+            (!enable_holyday && shift == "年休")) {
+              return;
+          }
+          
+          // 時間チェック
+          if (starttime != "" || endtime != "")
+          {
+            if (!regexp_time.test(starttime) || !regexp_time.test(endtime)) {
+              return;
+            }
+          }
+          
+          // 日付形式に変換
+          let startdate = new Date(`${year}/${date}  ${starttime}`);
+          let enddate = new Date(`${year}/${date}  ${endtime}`);
+
+          // 夜勤対応
+          // 例＞ 開始21:00, 終了10:00　など、終了が開始よりも前の時刻の場合は
+          //　　　翌日10:00 とする
+          if (enddate < startdate) {
+            enddate.setDate(enddate.getDate() + 1);
+          }
+
+          // シフト, 開始時刻（YYYY/MM/DD HH:MM）, 終了時刻（YYYY/MM/DD HH:MM）
+          // 例＞B6,2022/1/13 10:00,2022/1/13 18:00
+          google_table +=`${shift},${formatDate(startdate)},${formatDate(enddate)}\n`;
+        }
+      }
+    });
+
+    return google_table;
+  }
+
+  // クッキー読み込み
+  function LoadCookie() {
+    FormAccess.CalenderID = $.cookie("calender_id") ? $.cookie("calender_id") : "";
+    FormAccess.EnableHoliday = $.cookie("enable_holyday") == "true" ? true : false; // 文字列⇔Boolean変換する
+    FormAccess.Alarms = $.cookie("alarm") ? $.cookie("alarm") : [0,0,0];
+  }
+
+  // クッキー保存
+  function SaveCookie() {
+    $.cookie("calender_id", FormAccess.CalenderID, { expires: 90, secure: true });
+    $.cookie("enable_holyday", FormAccess.EnableHoliday, { expires: 90, secure: true });
+    $.cookie("alarm", FormAccess.Alarms, { expires: 90, secure: true });
+    console.log("Cookie is Saved.");
+    console.log("calender_id:"+$.cookie("calender_id"));
+    console.log("enable_holyday:"+$.cookie("enable_holyday"));
+    console.log("alarm:"+$.cookie("alarm"));
+  }
+
+  // 送信開始
+  function SubmitStart() {
+    const h = $(window).height();
+    $("#loader-bg ,#loader").height(h).css("display", "block");
+    $("#loader").activity();    // インジケーター表示
+  }
+
+  // 送信完了
+  function SubmitComplete() {
+    $("#loader").delay(0).fadeOut(300); // ローディングをフェードアウト
+    $("#loader-bg").delay(0).fadeOut(800); // 背景色をフェードアウト
+  }
+});
+</script>

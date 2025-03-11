@@ -1,0 +1,2 @@
+# ShiftMaxImporter
+GAS
