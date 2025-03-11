@@ -12,6 +12,10 @@ https://script.google.com/macros/s/AKfycbwyrZjEpauddee6ttSV0o5L_FsxNaOFeU1yIQm6d
 都度、アプリを開いてシフトを確認する必要があった。
 + 自身は、スケジュールをスマートフォンのカレンダーアプリで管理していた為、
 Googleカレンダー経由で取り込みができるツールが必要だった。
+## 機能
++ ShiftMaxから、シフト表の取り込み（テキスト形式：日付・シフト名・開始時刻[hh:mm]、終了時刻[hh:mm]）
++ 取り込み先カレンダーの指定（メインカレンダー他）
++ 指定時刻の通知機能（30分前～、選択式）
 ## 要件
 + スマートフォンとPCの両方で利用できること。
 + GoogleカレンダーAPIを利用したかった為、Google App Scriptを採用。
