@@ -1,4 +1,6 @@
 # ShiftMaxImporter
+![Image](https://github.com/user-attachments/assets/fa2f9c08-ff68-43bf-bb96-55e2a665f203)
+
 ## 概要
 KYODOU株式会社製シフト管理ツール[ShiftMax](https://shiftmax.co.jp/)で作成されたシフト表を、Googleカレンダーに取り込むツールです。
 ## URL
